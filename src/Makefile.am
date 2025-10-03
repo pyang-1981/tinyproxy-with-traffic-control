@@ -23,6 +23,9 @@ AM_CPPFLAGS = \
 	-DSYSCONFDIR=\"${pkgsysconfdir}\" \
 	-DLOCALSTATEDIR=\"${localstatedir}\"
 
+AM_CPPFLAGS += @LIBNL_CFLAGS@
+LDADD = @LIBNL_LIBS@
+
 tinyproxy_SOURCES = \
 	hostspec.c hostspec.h \
 	acl.c acl.h \

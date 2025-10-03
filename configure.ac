@@ -112,6 +112,7 @@ AM_CONDITIONAL(HAVE_MANPAGE_INTEREST, test x"$manpage_support_enabled" = x"yes")
 
 # This is required to build test programs below
 AC_PROG_CC
+AC_PROG_PKG_CONFIG
 
 dnl
 dnl Checks for libraries
@@ -133,6 +134,8 @@ if test x"$tinyproxy_no_nsl_checks" != x"yes"; then
 fi
 
 AC_CHECK_LIB(resolv, inet_aton)
+
+PKG_CHECK_MODULES([LIBNL], [libnl-3.0])
 
 dnl
 dnl Checks for headers

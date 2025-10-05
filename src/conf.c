@@ -638,6 +638,89 @@ set_int_arg (unsigned int *var, const char *line, regmatch_t * match)
         return 0;
 }
 
+/*
+ * Check if a string represents a valid integer (digits only).
+ * Returns 1 if valid, 0 if invalid.
+ * Rejects integers with leading zeros (except single '0').
+ */
+static int
+is_integer (const char *str)
+{
+        const char *p;
+
+        if (!str || *str == '\0')
+                return 0;
+
+        /* Skip leading whitespace */
+        p = str;
+        while (isspace(*p))
+                p++;
+
+        /* Must have at least one digit */
+        if (!isdigit(*p))
+                return 0;
+
+        /* Check for leading zero - only allow single '0' */
+        if (*p == '0' && isdigit(*(p + 1)))
+                return 0;
+
+        /* Check that all remaining characters are digits */
+        while (*p) {
+                if (!isdigit(*p))
+                        return 0;
+                p++;
+        }
+
+        return 1;
+}
+
+/*
+ * Check if a string represents a valid integer followed by "kbps".
+ * Returns 1 if valid (e.g., "100kbps", "1024kbps"), 0 if invalid.
+ * Rejects integers with leading zeros (except single '0').
+ */
+static int
+is_integer_kbps (const char *str)
+{
+        const char *p;
+        size_t len;
+
+        if (!str || *str == '\0')
+                return 0;
+
+        len = strlen(str);
+        
+        /* Must be at least 5 characters ("1kbps") */
+        if (len < 5)
+                return 0;
+
+        /* Must end with "kbps" */
+        if (strcmp(str + len - 4, "kbps") != 0)
+                return 0;
+
+        /* Skip leading whitespace */
+        p = str;
+        while (isspace(*p))
+                p++;
+
+        /* Must have at least one digit before "kbps" */
+        if (!isdigit(*p))
+                return 0;
+
+        /* Check for leading zero - only allow single '0' followed by "kbps" */
+        if (*p == '0' && p + 1 < str + len - 4 && isdigit(*(p + 1)))
+                return 0;
+
+        /* Check that all characters before "kbps" are digits */
+        while (p < str + len - 4) {
+                if (!isdigit(*p))
+                        return 0;
+                p++;
+        }
+
+        return 1;
+}
+
 /***********************************************************************
  *
  * Below are all the directive handling functions.  You will notice
@@ -932,6 +1015,21 @@ static HANDLE_FUNC (handle_trafficcontrol)
         if (!name || !value) {
                 if (name) safefree(name);
                 if (value) safefree(value);
+                return -1;
+        }
+
+        /*
+        * If value is not one of
+        * "unresponsive", a string interger,
+        * or a string interger followed by "kbps",
+        * return an error.
+        */
+        if (strcasecmp(value, "unresponsive") != 0 &&
+            !is_integer(value) &&
+            !is_integer_kbps(value)) {
+                CP_WARN ("Invalid traffic control rule value: '%s'", value);
+                safefree(name);
+                safefree(value);
                 return -1;
         }
 

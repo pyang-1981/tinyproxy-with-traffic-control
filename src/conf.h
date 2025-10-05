@@ -34,6 +34,12 @@ typedef struct {
         char *value;
 } http_header_t;
 
+enum traffic_rule_type {
+        UNRESPONSIVE,
+        STATUS_CODE,
+        BANDWIDTH_LIMIT
+};
+
 /*
  * Traffic control rule structure.
  */
@@ -44,13 +50,23 @@ typedef struct {
         char *name;
 
         /*
+        * Rule type. One of:
+        * 1. UNRESPONSIVE
+        * 2. STATUS_CODE
+        * 3. BANDWIDTH_LIMIT
+        */
+        enum traffic_rule_type type;
+
+        /*
          * Rule value.
          * Can be
-         *  - literal "unresponsive"
          *  - A string integer representing the HTTP status code, such as "200"
          *  - A bandwidth limit in kbps, such as "500kbps"
          */
-        char *value;
+        union {
+                uint16_t status_code;
+                uint64_t bandwidth_kbps;
+        } rule_value;
 } traffic_control_rule_t;
 
 /*

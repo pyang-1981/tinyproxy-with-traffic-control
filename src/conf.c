@@ -290,7 +290,6 @@ static void free_traffic_control_rules(sblist *rules) {
         for (i = 0; i < sblist_getsize(rules); i++) {
                 traffic_control_rule_t *rule = sblist_get(rules, i);
                 safefree(rule->name);
-                safefree(rule->value);
         }
 
         sblist_free(rules);
@@ -1046,7 +1045,28 @@ static HANDLE_FUNC (handle_trafficcontrol)
         }
 
         rule.name = name;
-        rule.value = value;
+        if (strcasecmp(value, "unresponsive") == 0) {
+                rule.type = UNRESPONSIVE;
+                safefree(value);
+        } else if (is_integer_kbps(value)) {
+                size_t len = strlen(value);
+                char *num_str = (char *)safemalloc(len - 3); /* exclude "kbps" */
+                if (!num_str) {
+                        safefree(name);
+                        safefree(value);
+                        return -1;
+                }
+                memcpy(num_str, value, len - 4);
+                num_str[len - 4] = '\0';
+                rule.rule_value.bandwidth_kbps = (uint64_t)strtoul(num_str, NULL, 0);
+                safefree(num_str);
+                safefree(value);
+                rule.type = BANDWIDTH_LIMIT;
+        } else {
+                rule.rule_value.status_code = (uint16_t)strtoul(value, NULL, 0);
+                rule.type = STATUS_CODE;
+                safefree(value);
+        }
 
         sblist_add (conf->traffic_control_rules, &rule);
 

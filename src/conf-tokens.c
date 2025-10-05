@@ -59,7 +59,8 @@ config_directive_find (register const char *str, register size_t len)
       {"basicauth", CD_basicauth},
       {"basicauthrealm", CD_basicauthrealm},
       {"addheader", CD_addheader},
-      {"maxrequestsperchild", CD_maxrequestsperchild}
+      {"maxrequestsperchild", CD_maxrequestsperchild},
+      {"trafficcontrol", CD_trafficcontrol},
     };
 
 	for(i=0;i<sizeof(wordlist)/sizeof(wordlist[0]);++i) {

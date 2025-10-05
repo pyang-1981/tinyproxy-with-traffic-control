@@ -35,6 +35,25 @@ typedef struct {
 } http_header_t;
 
 /*
+ * Traffic control rule structure.
+ */
+typedef struct {
+        /*
+         * CDN name.
+         */
+        char *name;
+
+        /*
+         * Rule value.
+         * Can be
+         *  - literal "unresponsive"
+         *  - A string integer representing the HTTP status code, such as "200"
+         *  - A bandwidth limit in kbps, such as "500kbps"
+         */
+        char *value;
+} traffic_control_rule_t;
+
+/*
  * Hold all the configuration time information.
  */
 struct config_s {
@@ -110,6 +129,11 @@ struct config_s {
          * Extra headers to be added to outgoing HTTP requests.
          */
         sblist* add_headers;
+
+        /*
+         * Traffic control rules for each CDN.
+        */
+       sblist* traffic_control_rules;
 };
 
 extern int reload_config_file (const char *config_fname, struct config_s *conf);

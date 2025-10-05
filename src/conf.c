@@ -131,6 +131,7 @@ static HANDLE_FUNC (handle_defaulterrorfile);
 static HANDLE_FUNC (handle_deny);
 static HANDLE_FUNC (handle_errorfile);
 static HANDLE_FUNC (handle_addheader);
+static HANDLE_FUNC (handle_trafficcontrol);
 #ifdef FILTER_ENABLE
 static HANDLE_FUNC (handle_filter);
 static HANDLE_FUNC (handle_filtercasesensitive);
@@ -257,7 +258,10 @@ struct {
 #endif
         /* loglevel */
         STDCONF (loglevel, "(critical|error|warning|notice|connect|info)",
-                 handle_loglevel)
+                 handle_loglevel),
+
+        /* Traffic control */
+        STDCONF (trafficcontrol, STR WS STR, handle_trafficcontrol)
 };
 
 const unsigned int ndirectives = sizeof (directives) / sizeof (directives[0]);
@@ -277,6 +281,19 @@ free_added_headers (sblist* add_headers)
         }
 
         sblist_free (add_headers);
+}
+
+static void free_traffic_control_rules(sblist *rules) {
+        size_t i;
+        if (!rules) return;
+
+        for (i = 0; i < sblist_getsize(rules); i++) {
+                traffic_control_rule_t *rule = sblist_get(rules, i);
+                safefree(rule->name);
+                safefree(rule->value);
+        }
+
+        sblist_free(rules);
 }
 
 static void stringlist_free(sblist *sl) {
@@ -335,6 +352,7 @@ void free_config (struct config_s *conf)
                        safefree(k);
                 htab_destroy (conf->anonymous_map);
         }
+        free_traffic_control_rules(conf->traffic_control_rules);
 
         memset (conf, 0, sizeof(*conf));
 }
@@ -620,6 +638,89 @@ set_int_arg (unsigned int *var, const char *line, regmatch_t * match)
         return 0;
 }
 
+/*
+ * Check if a string represents a valid integer (digits only).
+ * Returns 1 if valid, 0 if invalid.
+ * Rejects integers with leading zeros (except single '0').
+ */
+static int
+is_integer (const char *str)
+{
+        const char *p;
+
+        if (!str || *str == '\0')
+                return 0;
+
+        /* Skip leading whitespace */
+        p = str;
+        while (isspace(*p))
+                p++;
+
+        /* Must have at least one digit */
+        if (!isdigit(*p))
+                return 0;
+
+        /* Check for leading zero - only allow single '0' */
+        if (*p == '0' && isdigit(*(p + 1)))
+                return 0;
+
+        /* Check that all remaining characters are digits */
+        while (*p) {
+                if (!isdigit(*p))
+                        return 0;
+                p++;
+        }
+
+        return 1;
+}
+
+/*
+ * Check if a string represents a valid integer followed by "kbps".
+ * Returns 1 if valid (e.g., "100kbps", "1024kbps"), 0 if invalid.
+ * Rejects integers with leading zeros (except single '0').
+ */
+static int
+is_integer_kbps (const char *str)
+{
+        const char *p;
+        size_t len;
+
+        if (!str || *str == '\0')
+                return 0;
+
+        len = strlen(str);
+        
+        /* Must be at least 5 characters ("1kbps") */
+        if (len < 5)
+                return 0;
+
+        /* Must end with "kbps" */
+        if (strcmp(str + len - 4, "kbps") != 0)
+                return 0;
+
+        /* Skip leading whitespace */
+        p = str;
+        while (isspace(*p))
+                p++;
+
+        /* Must have at least one digit before "kbps" */
+        if (!isdigit(*p))
+                return 0;
+
+        /* Check for leading zero - only allow single '0' followed by "kbps" */
+        if (*p == '0' && p + 1 < str + len - 4 && isdigit(*(p + 1)))
+                return 0;
+
+        /* Check that all characters before "kbps" are digits */
+        while (p < str + len - 4) {
+                if (!isdigit(*p))
+                        return 0;
+                p++;
+        }
+
+        return 1;
+}
+
 /***********************************************************************
  *
  * Below are all the directive handling functions.  You will notice
@@ -901,6 +1002,53 @@ static HANDLE_FUNC (handle_addheader)
 
         /* Don't free name or value here, as they are referenced in the
          * struct inserted into the vector. */
+
+        return 0;
+}
+
+static HANDLE_FUNC (handle_trafficcontrol)
+{
+        char *name = get_string_arg (line, &match[2]);
+        char *value = get_string_arg (line, &match[3]);
+        traffic_control_rule_t rule;
+
+        if (!name || !value) {
+                if (name) safefree(name);
+                if (value) safefree(value);
+                return -1;
+        }
+
+        /*
+        * If value is not one of
+        * "unresponsive", a string interger,
+        * or a string interger followed by "kbps",
+        * return an error.
+        */
+        if (strcasecmp(value, "unresponsive") != 0 &&
+            !is_integer(value) &&
+            !is_integer_kbps(value)) {
+                CP_WARN ("Invalid traffic control rule value: '%s'", value);
+                safefree(name);
+                safefree(value);
+                return -1;
+        }
+
+        if(!conf->traffic_control_rules) {
+                conf->traffic_control_rules =
+                        sblist_new(sizeof(traffic_control_rule_t), 16);
+                if(!conf->traffic_control_rules) {
+                        CP_WARN ("Could not create traffic control rules list.",
+                                 "");
+                        safefree(name);
+                        safefree(value);
+                        return -1;
+                }
+        }
+
+        rule.name = name;
+        rule.value = value;
+
+        sblist_add (conf->traffic_control_rules, &rule);
 
         return 0;
 }

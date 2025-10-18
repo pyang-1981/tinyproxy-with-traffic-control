@@ -60,7 +60,9 @@ config_directive_find (register const char *str, register size_t len)
       {"basicauthrealm", CD_basicauthrealm},
       {"addheader", CD_addheader},
       {"maxrequestsperchild", CD_maxrequestsperchild},
-      {"trafficcontrol", CD_trafficcontrol},
+      {"trafficcontrolrule", CD_trafficcontrolrule},
+      {"trafficcontroldevname", CD_trafficcontroldevname},
+      {"trafficcontrolmapping", CD_trafficcontrolmapping},
     };
 
 	for(i=0;i<sizeof(wordlist)/sizeof(wordlist[0]);++i) {

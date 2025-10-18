@@ -70,6 +70,14 @@ typedef struct {
 } traffic_control_rule_t;
 
 /*
+* Traffic control mapping, i.e. hostname to CDN name.
+*/
+typedef struct {
+        char *hostname;
+        char *cdn_name;
+} traffic_control_mapping_t;
+
+/*
  * Hold all the configuration time information.
  */
 struct config_s {
@@ -150,6 +158,16 @@ struct config_s {
          * Traffic control rules for each CDN.
         */
        sblist* traffic_control_rules;
+
+       /*
+       * Traffic control device name.
+       */
+      char *traffic_control_dev_name;
+
+       /*
+        * Traffic control mappings.
+        */
+       sblist* traffic_control_mappings;
 };
 
 extern int reload_config_file (const char *config_fname, struct config_s *conf);

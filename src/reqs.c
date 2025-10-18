@@ -52,6 +52,7 @@
 #include "basicauth.h"
 #include "loop.h"
 #include "mypoll.h"
+#include "traffic-control.h"
 
 /*
  * Maximum length of a HTTP line
@@ -1568,6 +1569,41 @@ static void auth_error(struct conn_s *connptr, int code) {
         indicate_http_error (connptr, code, tit, "detail", msg, NULL);
 }
 
+static traffic_control_rule_t* get_traffic_control_rule_from_host(const char *host)
+{
+        // Save a copy of the host mapping list in case the config is rotated.
+        sblist *mappings = config->traffic_control_mappings;
+        // The same for the rules
+        sblist *rules = config->traffic_control_rules;
+        size_t i;
+        char *cdn_name = NULL;
+        traffic_control_rule_t *target_rule = NULL;
+
+        // Find the traffic control rule from the host header.
+        if (mappings != NULL) {
+                for (i = 0; i < sblist_getsize(mappings); i++) {
+                        traffic_control_mapping_t *mapping = sblist_get(mappings, i);
+                        if (mapping && !strncasecmp(mapping->hostname, host, strlen(host))) {
+                                cdn_name = mapping->cdn_name;
+                                break;
+                        }
+                }
+        }
+        if (rules != NULL) {
+                for (i = 0; i < sblist_getsize(rules); i++) {
+                        traffic_control_rule_t *rule = sblist_get(rules, i);
+                        if (rule && !strncasecmp(rule->name, "default", strlen("default"))) {
+                                target_rule = rule;
+                        }
+                        if (rule && cdn_name && !strncasecmp(rule->name, cdn_name, strlen(cdn_name))) {
+                                target_rule = rule;
+                                break;
+                        }
+                }
+        }
+        return target_rule;
+}
+
 /*
  * This is the main drive for each connection. As you can tell, for the
  * first few steps we are using a blocking socket. If you remember the
@@ -1591,6 +1627,7 @@ void handle_connection (struct conn_s *connptr, union sockaddr_union* addr)
         size_t i;
         struct request_s *request = NULL;
         pseudomap *hashofheaders = NULL;
+        traffic_control_rule_t *rule = NULL;
 
         char sock_ipaddr[IP_LENGTH];
         char peer_ipaddr[IP_LENGTH];
@@ -1718,6 +1755,38 @@ void handle_connection (struct conn_s *connptr, union sockaddr_union* addr)
                 }
                 HC_FAIL();
         }
+
+        // Setup the traffic control for this connection.
+        // Find the traffic control rule from the host header.
+        rule = get_traffic_control_rule_from_host(request->host);
+        if (rule && rule->type == UNRESPONSIVE) {
+                log_message (LOG_INFO,
+                             "Close connection to host \"%s\" as per traffic control rule \"%s\"",
+                             request->host, rule->name);
+                HC_FAIL();
+        }
+        if (rule && rule->type == STATUS_CODE) {
+                log_message (LOG_INFO,
+                             "Return status code %d for host \"%s\" as per traffic control rule \"%s\"",
+                             rule->rule_value.status_code, request->host, rule->name);
+                indicate_http_error (connptr, rule->rule_value.status_code,
+                                     "Request blocked by traffic control",
+                                     "detail",
+                                     "The request has been blocked as per "
+                                     "traffic control rules configured on the proxy.",
+                                     NULL);
+                HC_FAIL();
+        }
+        if(rule && rule->type == BANDWIDTH_LIMIT && setup_traffic_control_conn(fd, rule->name) < 0) {
+                log_message(LOG_ERR, "Failed to setup traffic control for connection");
+                indicate_http_error (connptr, 500, "Internal Server Error",
+                                     "detail",
+                                     "Failed to setup traffic control while processing "
+                                     "your request. Please contact the administrator.",
+                                     NULL);
+                HC_FAIL();
+        }
+
 
         connptr->upstream_proxy = UPSTREAM_HOST (request->host);
         if (connptr->upstream_proxy != NULL) {

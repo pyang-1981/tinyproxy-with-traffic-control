@@ -35,6 +35,7 @@
 #include "loop.h"
 #include "conns.h"
 #include "mypoll.h"
+#include "traffic-control.h"
 #include <pthread.h>
 
 static sblist* listen_fds;
@@ -85,9 +86,11 @@ void child_main_loop (void)
         int nfds = sblist_getsize(listen_fds);
         pollfd_struct *fds = safecalloc(nfds, sizeof *fds);
         ssize_t i;
+        size_t j;
         int ret, listenfd, was_full = 0;
         pthread_attr_t *attrp, attr;
         struct child *child;
+        traffic_control_rule_t *rule = NULL;
 
         childs = sblist_new(sizeof (struct child*), config->maxclients);
 
@@ -126,6 +129,17 @@ void child_main_loop (void)
 #ifdef FILTER_ENABLE
                         filter_reload ();
 #endif /* FILTER_ENABLE */
+
+                        // Check the traffic control rule changes
+                        for (j = 0; j < sblist_getsize(config->traffic_control_rules); j++) {
+                                rule = sblist_get(config->traffic_control_rules, j);
+                                if (rule) {
+                                        if (rule->type != BANDWIDTH_LIMIT) continue;
+                                        if (setup_cdn_traffic_control(config->traffic_control_dev_name, rule->name, rule->rule_value.bandwidth_kbps) < 0) {
+                                                fprintf(stderr, "WARNING: can't update the traffic rule for %s.\n", rule->name);
+                                        }
+                                }
+                        }
 
                         received_sighup = FALSE;
                 }

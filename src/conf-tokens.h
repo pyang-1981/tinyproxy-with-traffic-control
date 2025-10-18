@@ -44,7 +44,9 @@ CD_reversemagic,
 CD_reversepath,
 CD_upstream,
 CD_loglevel,
-CD_trafficcontrol,
+CD_trafficcontrolrule,
+CD_trafficcontroldevname,
+CD_trafficcontrolmapping,
 };
 
 struct config_directive_entry { const char* name; enum config_directive value; };

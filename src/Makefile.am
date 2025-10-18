@@ -23,6 +23,8 @@ AM_CPPFLAGS = \
 	-DSYSCONFDIR=\"${pkgsysconfdir}\" \
 	-DLOCALSTATEDIR=\"${localstatedir}\"
 
+AM_CFLAGS = -std=gnu11
+
 AM_CPPFLAGS += @LIBNL_CFLAGS@
 LDADD = @LIBNL_LIBS@
 
@@ -56,13 +58,14 @@ tinyproxy_SOURCES = \
 	pseudomap.c pseudomap.h \
 	loop.c loop.h \
 	mypoll.c mypoll.h \
-	connect-ports.c connect-ports.h
+	connect-ports.c connect-ports.h \
+	traffic-control.c traffic-control.h
 
 EXTRA_tinyproxy_SOURCES = filter.c filter.h \
 	reverse-proxy.c reverse-proxy.h \
 	transparent-proxy.c transparent-proxy.h
 tinyproxy_DEPENDENCIES = @ADDITIONAL_OBJECTS@
-tinyproxy_LDADD = @ADDITIONAL_OBJECTS@ -lpthread
+tinyproxy_LDADD = @ADDITIONAL_OBJECTS@ @LIBNL_LIBS@ -lpthread
 
 if HAVE_GPERF
 conf-tokens.c: conf-tokens-gperf.inc
@@ -70,5 +73,6 @@ conf-tokens-gperf.inc: conf-tokens.gperf
 	$(GPERF) $< > $@
 endif
 
-EXTRA_DIST = conf-tokens.gperf conf-tokens-gperf.inc
+EXTRA_DIST = conf-tokens.gperf conf-tokens-gperf.inc \
+ 	traffic-control.h
 

@@ -29,6 +29,7 @@
 #include "heap.h"
 #include "log.h"
 #include "stats.h"
+#include "traffic-control.h"
 
 void conn_struct_init(struct conn_s *connptr) {
         connptr->error_number = -1;
@@ -81,10 +82,13 @@ void conn_destroy_contents (struct conn_s *connptr)
 {
         assert (connptr != NULL);
 
-        if (connptr->client_fd != -1)
+        if (connptr->client_fd != -1) {
                 if (close (connptr->client_fd) < 0)
                         log_message (LOG_INFO, "Client (%d) close message: %s",
                                      connptr->client_fd, strerror (errno));
+                // Cleanup the traffic control for this connection.
+                cleanup_traffic_control_conn(connptr->client_fd);
+        }
         connptr->client_fd = -1;
         if (connptr->server_fd != -1)
                 if (close (connptr->server_fd) < 0)

@@ -131,7 +131,9 @@ static HANDLE_FUNC (handle_defaulterrorfile);
 static HANDLE_FUNC (handle_deny);
 static HANDLE_FUNC (handle_errorfile);
 static HANDLE_FUNC (handle_addheader);
-static HANDLE_FUNC (handle_trafficcontrol);
+static HANDLE_FUNC (handle_traffic_control_rule);
+static HANDLE_FUNC (handle_traffic_control_dev_name);
+static HANDLE_FUNC (handle_traffic_control_mapping);
 #ifdef FILTER_ENABLE
 static HANDLE_FUNC (handle_filter);
 static HANDLE_FUNC (handle_filtercasesensitive);
@@ -261,7 +263,9 @@ struct {
                  handle_loglevel),
 
         /* Traffic control */
-        STDCONF (trafficcontrol, STR WS STR, handle_trafficcontrol)
+        STDCONF (trafficcontrolrule, ALNUM WS ALNUM, handle_traffic_control_rule),
+        STDCONF (trafficcontroldevname, ALNUM, handle_traffic_control_dev_name),
+        STDCONF (trafficcontrolmapping, ALNUM WS ALNUM, handle_traffic_control_mapping),
 };
 
 const unsigned int ndirectives = sizeof (directives) / sizeof (directives[0]);
@@ -293,6 +297,19 @@ static void free_traffic_control_rules(sblist *rules) {
         }
 
         sblist_free(rules);
+}
+
+static void free_traffic_control_mappings(sblist *mappings) {
+        size_t i;
+        if (!mappings) return;
+
+        for (i = 0; i < sblist_getsize(mappings); i++) {
+                traffic_control_mapping_t *mapping = sblist_get(mappings, i);
+                safefree(mapping->hostname);
+                safefree(mapping->cdn_name);
+        }
+
+        sblist_free(mappings);
 }
 
 static void stringlist_free(sblist *sl) {
@@ -352,6 +369,8 @@ void free_config (struct config_s *conf)
                 htab_destroy (conf->anonymous_map);
         }
         free_traffic_control_rules(conf->traffic_control_rules);
+        safefree(conf->traffic_control_dev_name);
+        free_traffic_control_mappings(conf->traffic_control_mappings);
 
         memset (conf, 0, sizeof(*conf));
 }
@@ -507,6 +526,9 @@ static void initialize_config_defaults (struct config_s *conf)
         conf->logf_name = NULL;
         conf->pidpath = NULL;
         conf->maxclients = 100;
+        conf->traffic_control_dev_name = NULL;
+        conf->traffic_control_mappings = NULL;
+        conf->traffic_control_rules = NULL;
 }
 
 /**
@@ -1005,7 +1027,39 @@ static HANDLE_FUNC (handle_addheader)
         return 0;
 }
 
-static HANDLE_FUNC (handle_trafficcontrol)
+static HANDLE_FUNC (handle_traffic_control_mapping)
+{
+        char *hostname = get_string_arg (line, &match[2]);
+        char *cdn_name = get_string_arg (line, &match[3]);
+        traffic_control_mapping_t mapping;
+
+        if (!hostname || !cdn_name) {
+                if (hostname) safefree(hostname);
+                if (cdn_name) safefree(cdn_name);
+                return -1;
+        }
+
+        if(!conf->traffic_control_mappings) {
+                conf->traffic_control_mappings =
+                        sblist_new(sizeof(traffic_control_mapping_t), 16);
+                if(!conf->traffic_control_mappings) {
+                        CP_WARN ("Could not create traffic control mappings list.",
+                                 "");
+                        safefree(hostname);
+                        safefree(cdn_name);
+                        return -1;
+                }
+        }
+
+        mapping.hostname = hostname;
+        mapping.cdn_name = cdn_name;
+
+        sblist_add (conf->traffic_control_mappings, &mapping);
+
+        return 0;
+}
+
+static HANDLE_FUNC (handle_traffic_control_rule)
 {
         char *name = get_string_arg (line, &match[2]);
         char *value = get_string_arg (line, &match[3]);
@@ -1070,6 +1124,18 @@ static HANDLE_FUNC (handle_trafficcontrol)
 
         sblist_add (conf->traffic_control_rules, &rule);
 
+        return 0;
+}
+
+static HANDLE_FUNC (handle_traffic_control_dev_name)
+{
+        int r = set_string_arg (&conf->traffic_control_dev_name, line, &match[2]);
+
+        if (r)
+                return r;
+        log_message (LOG_INFO,
+                     "Setting traffic control device name to '%s'",
+                     conf->traffic_control_dev_name);
         return 0;
 }
 

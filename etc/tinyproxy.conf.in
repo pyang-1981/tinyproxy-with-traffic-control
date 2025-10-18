@@ -12,8 +12,8 @@
 # as the root user. Either the user or group name or the UID or GID
 # number may be used.
 #
-User nobody
-Group nobody
+#User nobody
+#Group nobody
 
 #
 # Port: Specify the port which tinyproxy will listen on.  Please note
@@ -327,3 +327,24 @@ ViaProxyName "tinyproxy"
 # If not set then no rewriting occurs.
 #
 #ReverseBaseURL "http://localhost:8888/"
+
+#
+# Traffic control device (interface) name. This interface is used to
+# connect to the proxy clients. 
+#
+TrafficControlDevName lo
+
+#
+# Traffic control rules. It defines the behavior of a CDN as one of
+# the following:
+# 1. unresponsive
+# 2. 10000kbps (bandwith limit)
+# 3. 400 (status code)
+#
+TrafficControlRule akamai 10000kbps
+
+#
+# Traffic control mappings. It defines how to map a hostname to
+# a CDN name, thus the corresponding traffic control rule.
+#
+TrafficControlMapping localhost akamai

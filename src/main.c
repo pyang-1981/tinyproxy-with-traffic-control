@@ -43,6 +43,7 @@
 #include "reqs.h"
 #include "sock.h"
 #include "stats.h"
+#include "traffic-control.h"
 #include "utils.h"
 
 /*
@@ -291,6 +292,8 @@ int
 main (int argc, char **argv)
 {
         int opt, daemonized = TRUE;
+        size_t i;
+        traffic_control_rule_t *rule = NULL;
 
         srand(time(NULL)); /* for hashmap seeds */
 
@@ -334,6 +337,41 @@ main (int argc, char **argv)
 
         if (reload_config(0)) {
                 exit (EX_SOFTWARE);
+        }
+
+        /*
+        * Setup traffic control
+        */
+        if (config->traffic_control_dev_name == NULL) {
+                fprintf(stderr, "ERROR: traffic control device name is not set in the config file.\n");
+                exit (EX_SOFTWARE);
+        }
+        if (config->traffic_control_rules == NULL ||
+            sblist_getsize(config->traffic_control_rules) == 0) {
+                fprintf(stderr, "ERROR: no traffic control rules are set in the config file.\n");
+                exit (EX_SOFTWARE);
+        }
+        if (setup_netlink() < 0) {
+                fprintf(stderr, "ERROR: can't setup the netlink socket.\n");
+                exit (EX_SOFTWARE);
+        }
+        if (setup_traffic_control_dev(config->traffic_control_dev_name) < 0) {
+                fprintf(stderr, "ERROR: can't setup the traffic control device %s", config->traffic_control_dev_name);
+                cleanup_netlink();
+                exit (EX_SOFTWARE);
+        }
+        // Setup traffic control rules
+        for (i = 0; i < sblist_getsize(config->traffic_control_rules); ++i) {
+                rule = sblist_get(config->traffic_control_rules, i);
+                if (rule) {
+                        if (rule->type != BANDWIDTH_LIMIT) continue;
+                        if (setup_cdn_traffic_control(config->traffic_control_dev_name, rule->name, rule->rule_value.bandwidth_kbps) < 0) {
+                                fprintf(stderr, "ERROR: can't setup traffic control rule\n");
+                                cleanup_traffic_control_dev_list();
+                                cleanup_netlink();
+                                exit (EX_SOFTWARE);
+                        }
+                }
         }
 
         init_stats ();
@@ -413,6 +451,11 @@ main (int argc, char **argv)
         child_free_children();
 
         loop_records_destroy();
+
+        // Clean traffic control
+        cleanup_all_traffic_control_conns();
+        cleanup_traffic_control_dev_list();
+        cleanup_netlink();
 
         /* Remove the PID file */
         if (config->pidpath != NULL && unlink (config->pidpath) < 0) {

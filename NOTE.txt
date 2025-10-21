@@ -1,0 +1,187 @@
+Tinyproxy with Traffic-Control — Deployment and troubleshooting notes
+===============================================================
+
+This file documents the steps to build images and deploy the tinyproxy Helm chart (with dynamic tinyproxy.conf updates) to a Kubernetes cluster.
+
+Prerequisites
+-------------
+- Docker (or another OCI builder) installed and working
+- kubectl configured to talk to your cluster (kind, minikube, k3s, GKE, etc.)
+- Helm v3 installed
+- (optional) kind or minikube if you want a local cluster
+
+Quick overview
+--------------
+1) Build the tinyproxy runtime image (project root contains a Dockerfile).
+2) Build the small config-watcher image (under helm/tinyproxy/config-watcher).
+3) Make images available to your cluster (load into kind/minikube or push to a registry).
+4) Install the Helm chart in `helm/tinyproxy` with your desired values.
+5) Verify pods are running and the sidecar is copying/updating the config dynamically.
+
+Step-by-step
+------------
+
+1) Build the tinyproxy image (from repo root)
+
+```bash
+# from /home/yanyan/Projects/tinyproxy
+docker build -t tinyproxy:local .
+```
+
+2) Build the config-watcher image (tiny Go binary)
+
+```bash
+docker build -t tinyproxy-config-watcher:latest ./helm/tinyproxy/config-watcher
+```
+
+3) Make images available to the cluster
+
+If you're using kind (recommended for local testing):
+
+```bash
+# load images into a kind cluster (example cluster name 'kind')
+kind load docker-image tinyproxy:local --name kind
+kind load docker-image tinyproxy-config-watcher:latest --name kind
+```
+
+If you're using minikube:
+
+```bash
+minikube image load tinyproxy:local
+minikube image load tinyproxy-config-watcher:latest
+```
+
+If you're using a remote cluster, tag and push both images to your registry and update `helm/tinyproxy/values.yaml`:
+
+```bash
+docker tag tinyproxy:local registry.example.com/myproject/tinyproxy:1.0.0
+docker tag tinyproxy-config-watcher:latest registry.example.com/myproject/tinyproxy-config-watcher:1.0.0
+docker push registry.example.com/myproject/tinyproxy:1.0.0
+docker push registry.example.com/myproject/tinyproxy-config-watcher:1.0.0
+# then edit helm/tinyproxy/values.yaml to point image.repository and tag
+```
+
+4) (Optional) Edit defaults / example values
+
+Open `helm/tinyproxy/values.yaml` and set:
+
+- `image.repository` / `image.tag` for your tinyproxy image
+- `configWatcher.image.repository` / `tag`
+- `trafficControl.devName`, `trafficControl.rules`, `trafficControl.mappings`
+
+Example values snippet (save as my-values.yaml):
+
+```yaml
+trafficControl:
+  devName: eth0
+  rules:
+    - ["akamai", "unresponsive"]
+    - ["cdn2", "10000kbps"]
+  mappings:
+    - ["localhost", "akamai"]
+    - ["example.com", "cdn2"]
+configWatcher:
+  enabled: true
+  intervalSeconds: 5
+  image:
+    repository: tinyproxy-config-watcher
+    tag: latest
+```
+
+5) Render the chart locally to inspect the ConfigMap (verify tinyproxy.conf contents)
+
+```bash
+helm template tinyproxy ./helm/tinyproxy --values ./helm/tinyproxy/values.yaml
+
+# or with your override file
+helm template tinyproxy ./helm/tinyproxy --values ./helm/tinyproxy/values.yaml --values ./my-values.yaml
+```
+
+6) Install the chart
+
+```bash
+# install with default values
+helm install tinyproxy ./helm/tinyproxy --values ./helm/tinyproxy/values.yaml
+
+# or install with your custom values
+helm install tinyproxy ./helm/tinyproxy -f ./helm/tinyproxy/values.yaml -f ./my-values.yaml
+```
+
+7) Verify the deployment
+
+```bash
+# list objects
+kubectl get all -l app=tinyproxy
+
+# check pods
+kubectl get pods -l app=tinyproxy
+
+# inspect logs (main container)
+kubectl logs -l app=tinyproxy -c tinyproxy
+
+# inspect config-watcher logs
+kubectl logs -l app=tinyproxy -c config-watcher
+
+# show generated configmap (the chart creates a ConfigMap named <release>-tinyproxy-config)
+kubectl get configmap -l app=tinyproxy -o yaml
+
+# view the file the sidecar copies into /etc/tinyproxy inside the pod
+POD=$(kubectl get pods -l app=tinyproxy -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -it "$POD" -- cat /etc/tinyproxy/tinyproxy.conf
+```
+
+Dynamic updates (how it works)
+--------------------------------
+- The chart mounts the ConfigMap at `/config` (read-only) and uses an `emptyDir` mounted at `/etc/tinyproxy` for the runtime config.
+- An init container does an initial copy of `/config/tinyproxy.conf` -> `/config-data/tinyproxy.conf` so the main container sees the file immediately on startup.
+- A long-running `config-watcher` sidecar monitors the ConfigMap file (polling interval configured with `configWatcher.intervalSeconds`). When it detects a change it copies the new file into the `emptyDir` and sends SIGHUP to PID 1 in the pod.
+
+Important: verify that the tinyproxy binary in `src/tinyproxy` reloads configuration on SIGHUP. If it does not, you can:
+
+- Use `kubectl rollout restart deployment/<release-name>` after updating the ConfigMap.
+- Or change the watcher to patch an annotation on the Deployment to trigger a rolling update (more advanced; requires RBAC config if done from inside the cluster).
+
+Updating configuration
+----------------------
+You can update the ConfigMap and the watcher will apply the new config automatically:
+
+```bash
+# Edit and reapply the helm-managed ConfigMap via helm upgrade (preferred)
+# Update values and run:
+helm upgrade tinyproxy ./helm/tinyproxy -f ./helm/tinyproxy/values.yaml -f ./my-values.yaml
+
+# Or directly patch the generated ConfigMap (not recommended long-term, helm will overwrite on next upgrade):
+kubectl edit configmap tinyproxy-tinyproxy-config
+
+# To force a rolling restart (if SIGHUP is not supported):
+kubectl rollout restart deployment/tinyproxy-tinyproxy
+```
+
+Troubleshooting
+---------------
+- ImagePullBackOff: If running in a remote cluster, ensure images are pushed to a registry accessible by the cluster and update `values.yaml` to point to those images.
+- Permission / capability denied for NET_ADMIN: PodCapabilities may be restricted by cluster PodSecurityPolicies / PSP replacement (Gatekeeper) or PodSecurity admission. Request that the cluster admin allow `NET_ADMIN` capability or run tinyproxy on nodes where these are permitted.
+- Watcher didn't trigger reload: Confirm config-watcher logs and that it successfully copied the file. Confirm tinyproxy handles SIGHUP. If not, use rollout restart.
+- ConfigMap size limit: Kubernetes limits ConfigMap sizes (1MB etc.). If your config is very large, use a PVC or external config provider.
+
+Uninstall
+---------
+```bash
+helm uninstall tinyproxy
+kubectl delete configmap -l app=tinyproxy
+```
+
+Extras & tips
+-------------
+- To inspect template output for just the ConfigMap:
+  helm template tinyproxy ./helm/tinyproxy --show-only templates/configmap.yaml
+- To perform a dry-run upgrade:
+  helm upgrade --install tinyproxy ./helm/tinyproxy -f ./my-values.yaml --dry-run
+- For production, lock down `Allow` rules in `tinyproxy.conf` and configure proper logging and persistence (PVC for /var/log/tinyproxy).
+
+If you'd like, I can:
+- Add a NOTES.txt Helm template under `helm/tinyproxy/templates/NOTES.txt` so Helm prints install instructions after `helm install`.
+- Add a small convenience script that builds both images and loads them into kind/minikube.
+- Add a sample `my-values.yaml` file to the chart with the TrafficControl entries prefilled.
+
+-- end

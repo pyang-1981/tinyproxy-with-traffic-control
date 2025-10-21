@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tinyproxy.fullname" . }}
+  labels:
+    app: {{ include "tinyproxy.name" . }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "tinyproxy.name" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "tinyproxy.name" . }}
+    spec:
+      shareProcessNamespace: true
+      {{- if .Values.configWatcher.enabled }}
+      serviceAccountName: {{ include "tinyproxy.fullname" . }}-config-watcher
+      initContainers:
+      - name: config-init
+        image: {{ .Values.configWatcher.image.repository }}:{{ .Values.configWatcher.image.tag }}
+        imagePullPolicy: {{ .Values.configWatcher.image.pullPolicy }}
+        command:
+        - /usr/local/bin/config-watcher
+        args:
+        - --src=/config/tinyproxy.conf
+        - --dst=/config-data/tinyproxy.conf
+        - --once=true
+        volumeMounts:
+        - name: config
+          mountPath: /config
+        - name: config-data
+          mountPath: /config-data
+      {{- end }}
+
+      containers:
+      - name: {{ include "tinyproxy.name" . }}
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.service.port }}
+          name: http
+        volumeMounts:
+        - name: config-data
+          mountPath: /etc/tinyproxy
+        - name: varlog
+          mountPath: /var/log/tinyproxy
+        securityContext:
+          capabilities:
+            add: {{ toJson .Values.securityContext.addCapabilities }}
+
+      {{- if .Values.configWatcher.enabled }}
+      - name: config-watcher
+        image: {{ .Values.configWatcher.image.repository }}:{{ .Values.configWatcher.image.tag }}
+        imagePullPolicy: {{ .Values.configWatcher.image.pullPolicy }}
+        command:
+        - /usr/local/bin/config-watcher
+        args:
+        - --src=/config/tinyproxy.conf
+        - --dst=/config-data/tinyproxy.conf
+        - --configmap={{ include "tinyproxy.fullname" . }}-config
+        - --namespace={{ .Release.Namespace }}
+        volumeMounts:
+        - name: config
+          mountPath: /config
+        - name: config-data
+          mountPath: /config-data
+      {{- end }}
+
+      volumes:
+      - name: config
+        configMap:
+          name: {{ include "tinyproxy.fullname" . | trunc 63 | trimSuffix "-" }}-config
+      - name: config-data
+        emptyDir: {}
+      - name: varlog
+        emptyDir: {}
+
+

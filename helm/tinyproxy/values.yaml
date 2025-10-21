@@ -1,0 +1,35 @@
+image:
+  repository: tinyproxy
+  tag: "local"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: LoadBalancer
+  port: 8888
+
+trafficControl:
+  # device name for TrafficControlDevName directive
+  devName: lo
+  # list of traffic control rules: each item is [name, value]
+  # e.g. - ["akamai", "unresponsive"]
+  rules:
+    - ["akamai", "1000000kbps"]
+  # list of mappings: each item is [host, cdn]
+  # e.g. - ["localhost", "akamai"]
+  mappings:
+    - ["10.96.233.105", "akamai"]
+
+resources: {}
+
+securityContext:
+  addCapabilities:
+    - NET_ADMIN
+
+configWatcher:
+  enabled: true
+  image:
+    repository: tinyproxy-config-watcher
+    tag: latest
+    pullPolicy: IfNotPresent

@@ -1,0 +1,32 @@
+1. Build and make images available to your cluster (if needed)
+
+   docker build -t {{ .Values.image.repository }}:{{ .Values.image.tag }} .
+   docker build -t {{ .Values.configWatcher.image.repository }}:{{ .Values.configWatcher.image.tag }} ./helm/tinyproxy/config-watcher
+
+2. Install the chart
+
+   helm install {{ .Release.Name }} {{ .Chart.Name }} -f {{ .ValuesFiles }}
+
+3. Update traffic-control options dynamically (no rolling restart required)
+
+   Use `helm upgrade` to update values that change the ConfigMap. The chart does NOT trigger a rolling restart on ConfigMap changes; instead the config-watcher sidecar will apply the new config at runtime and send SIGHUP to the process.
+
+   Example: change the TrafficControlDevName and add a mapping
+
+   helm upgrade {{ .Release.Name }} {{ .Chart.Name }} \
+     --set trafficControl.devName=eth0 \
+     --set "trafficControl.mappings[0]=[\"example.com\",\"akamai\"]"
+
+   After the upgrade the ConfigMap is updated. The config-watcher will detect the change and copy the file into the running container's `/etc/tinyproxy` and send SIGHUP to PID 1 to request a reload. No pod restart should occur.
+
+4. Verify reload
+
+   # check config-watcher logs
+   kubectl logs -l app={{ include "tinyproxy.name" . }} -c config-watcher
+
+   # check tinyproxy logs for reload messages (SIGHUP handling logs)
+   kubectl logs -l app={{ include "tinyproxy.name" . }} -c {{ include "tinyproxy.name" . }}
+
+5. If you must force a restart (fallback)
+
+   kubectl rollout restart deployment/{{ include "tinyproxy.fullname" . }}

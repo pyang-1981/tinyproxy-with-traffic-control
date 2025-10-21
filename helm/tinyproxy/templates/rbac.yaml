@@ -1,0 +1,35 @@
+{{- if .Values.configWatcher.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "tinyproxy.fullname" . }}-config-watcher
+  labels:
+    app: {{ include "tinyproxy.name" . }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "tinyproxy.fullname" . }}-config-watcher
+  labels:
+    app: {{ include "tinyproxy.name" . }}
+rules:
+- apiGroups: [""]
+  resources: ["configmaps"]
+  resourceNames: ["{{ include "tinyproxy.fullname" . }}-config"]
+  verbs: ["get", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "tinyproxy.fullname" . }}-config-watcher
+  labels:
+    app: {{ include "tinyproxy.name" . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "tinyproxy.fullname" . }}-config-watcher
+subjects:
+- kind: ServiceAccount
+  name: {{ include "tinyproxy.fullname" . }}-config-watcher
+  namespace: {{ .Release.Namespace }}
+{{- end }}

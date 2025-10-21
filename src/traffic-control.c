@@ -30,6 +30,9 @@
 #define TC_ERR(FMT, ...) \
         log_message (LOG_ERR, FMT, __VA_ARGS__)
 
+#define TC_INFO(FMT, ...) \
+        log_message (LOG_INFO, FMT, __VA_ARGS__)
+
 sblist *devices;
 pthread_rwlock_t dev_lock = PTHREAD_RWLOCK_INITIALIZER;
 
@@ -277,6 +280,7 @@ int setup_traffic_control_dev(char *dev_name)
                 rtnl_link_put(link);
                 return -1;
         }
+        TC_INFO("Successfully created root HTB qdisc (1:0) on device %s", dev_name);
 
         /* Create the default HTB class */
         default_class = init_tc_class(1, 1, 10000000000ULL, link, netlink->sock); // 10 Gbps default
@@ -287,6 +291,7 @@ int setup_traffic_control_dev(char *dev_name)
                 rtnl_link_put(link);
                 return -1;
         }
+        TC_INFO("Successfully created default HTB class (1:1) with 10 Gbps bandwidth", "");
 
         dev.name = strdup(dev_name);
         if (!dev.name) {
@@ -580,6 +585,8 @@ int setup_cdn_traffic_control(
                 TC_ERR("Failed to initialize CDN traffic control class %s.", class_name);
                 return -1;
         }
+        TC_INFO("Successfully created traffic control class '%s' (1:%d) with bandwidth %lu kbps on device %s",
+                class_name, TC_H_MIN(rtnl_tc_get_handle(TC_CAST(tc_class->cls))), bandwidth_kbps, dev_name);
         sblist_add(dev->classes, tc_class);
         pthread_rwlock_unlock(dev->class_rwlock);
 
@@ -771,6 +778,22 @@ static int init_tc_filter(
         struct nl_msg *msg;
         struct tcmsg tc;
         struct nlattr *options;
+        char addr_str[INET6_ADDRSTRLEN];
+
+        // Log the parameters
+        if (addr->ss_family == AF_INET) {
+                struct sockaddr_in *sin = (struct sockaddr_in *)addr;
+                inet_ntop(AF_INET, &sin->sin_addr, addr_str, sizeof(addr_str));
+        } else if (addr->ss_family == AF_INET6) {
+                struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)addr;
+                inet_ntop(AF_INET6, &sin6->sin6_addr, addr_str, sizeof(addr_str));
+        } else {
+                snprintf(addr_str, sizeof(addr_str), "unknown");
+        }
+
+        TC_INFO("Creating tc filter: handle=%d:%d, classid=0x%x (%d:%d), dest=%s:%d, ifindex=%d, device=%s",
+                major, minor, classid, TC_H_MAJ(classid) >> 16, TC_H_MIN(classid),
+                addr_str, port, rtnl_link_get_ifindex(link), rtnl_link_get_name(link));
 
         msg = nlmsg_alloc();
         if (!msg) {
@@ -784,6 +807,8 @@ static int init_tc_filter(
         tc.tcm_parent = TC_HANDLE(1, 0);
         tc.tcm_handle = TC_HANDLE(major, minor);
         tc.tcm_info = 0;
+
+        TC_INFO("Filter parent: 0x%x (1:0), handle: 0x%x (%d:%d)", tc.tcm_parent, tc.tcm_handle, major, minor);
 
         /* Configure flower filter based on address family */
         if (addr->ss_family == AF_INET) {

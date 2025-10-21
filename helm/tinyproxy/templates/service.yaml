@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tinyproxy.fullname" . }}
+  labels:
+    app: {{ include "tinyproxy.name" . }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app: {{ include "tinyproxy.name" . }}
+  ports:
+  - name: http
+    port: {{ .Values.service.port }}
+    targetPort: http
